@@ -2,6 +2,7 @@
 export interface EventConfig {
   name: string;
   date: string;
+  logo: string | null; // Base64 ou URL da logo
 }
 
 export interface ProcessedVideo {
@@ -9,6 +10,7 @@ export interface ProcessedVideo {
   url: string;
   timestamp: string;
   event: string;
+  logo: string | null;
   caption?: string;
 }
 

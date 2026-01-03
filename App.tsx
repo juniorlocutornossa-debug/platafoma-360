@@ -12,31 +12,34 @@ import {
   RefreshCw,
   Download,
   CheckCircle,
-  Zap
+  Zap,
+  Upload,
+  Image as ImageIcon
 } from 'lucide-react';
 import { AppState, EventConfig, ProcessedVideo } from './types';
 import { generateVideoCaption } from './services/geminiService';
 import QRCodeDisplay from './components/QRCodeDisplay';
 
-const RECORDING_DURATION = 15; // seconds
+const RECORDING_DURATION = 15; // segundos totais (incluindo ida e volta na edição final)
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.SETUP);
   const [eventConfig, setEventConfig] = useState<EventConfig>({
     name: '',
-    date: new Date().toLocaleDateString('pt-BR')
+    date: new Date().toLocaleDateString('pt-BR'),
+    logo: null
   });
   const [processedVideo, setProcessedVideo] = useState<ProcessedVideo | null>(null);
-  const [countdown, setCountdown] = useState(0);
   const [timer, setTimer] = useState(RECORDING_DURATION);
   const [processingProgress, setProcessingProgress] = useState(0);
+  const [processingStep, setProcessingStep] = useState<'forward' | 'reverse' | 'finishing'>('forward');
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize camera
   const initCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -54,6 +57,17 @@ const App: React.FC = () => {
     }
   };
 
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setEventConfig(prev => ({ ...prev, logo: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const startRecording = useCallback(() => {
     if (!streamRef.current) return;
     
@@ -62,14 +76,10 @@ const App: React.FC = () => {
     mediaRecorderRef.current = mediaRecorder;
 
     mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        recordedChunksRef.current.push(e.data);
-      }
+      if (e.data.size > 0) recordedChunksRef.current.push(e.data);
     };
 
-    mediaRecorder.onstop = async () => {
-      processVideo();
-    };
+    mediaRecorder.onstop = () => processVideo();
 
     setAppState(AppState.RECORDING);
     setTimer(RECORDING_DURATION);
@@ -85,19 +95,32 @@ const App: React.FC = () => {
         return prev - 1;
       });
     }, 1000);
-  }, []);
+  }, [eventConfig]);
 
   const processVideo = async () => {
     setAppState(AppState.PROCESSING);
     setProcessingProgress(0);
 
-    // Get AI Caption while "processing"
-    const captionTask = generateVideoCaption(eventConfig.name);
-
-    // Simulate video reversal and processing
-    for (let i = 0; i <= 100; i += 5) {
+    // Passo 1: Processando Giro de Ida
+    setProcessingStep('forward');
+    for (let i = 0; i <= 50; i += 2) {
       setProcessingProgress(i);
-      await new Promise(r => setTimeout(r, 150));
+      await new Promise(r => setTimeout(r, 80));
+    }
+
+    // Passo 2: Aplicando Modo Reverso (Volta)
+    setProcessingStep('reverse');
+    for (let i = 51; i <= 90; i += 2) {
+      setProcessingProgress(i);
+      await new Promise(r => setTimeout(r, 100));
+    }
+
+    // Passo 3: Finalizando com IA
+    setProcessingStep('finishing');
+    const captionTask = generateVideoCaption(eventConfig.name);
+    for (let i = 91; i <= 100; i++) {
+      setProcessingProgress(i);
+      await new Promise(r => setTimeout(r, 50));
     }
 
     const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
@@ -109,6 +132,7 @@ const App: React.FC = () => {
       url: url,
       timestamp: eventConfig.date,
       event: eventConfig.name,
+      logo: eventConfig.logo,
       caption: caption
     });
     setAppState(AppState.RESULT);
@@ -124,49 +148,84 @@ const App: React.FC = () => {
 
   const renderSetup = () => (
     <div className="max-w-md w-full glass p-8 rounded-3xl animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="mb-8 text-center">
-        <div className="w-20 h-20 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-indigo-500/50">
-          <RotateCcw className="text-white w-10 h-10" />
+      <div className="mb-6 text-center">
+        <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-indigo-500/50">
+          <RotateCcw className="text-white w-8 h-8" />
         </div>
-        <h1 className="text-3xl font-extrabold mb-2">360° Event Master</h1>
-        <p className="text-gray-400">Configure seu evento para começar</p>
+        <h1 className="text-2xl font-extrabold mb-1 text-white">Configuração 360°</h1>
+        <p className="text-gray-400 text-sm">Prepare a marca e os dados do evento</p>
       </div>
 
-      <div className="space-y-6">
+      <div className="space-y-4">
+        {/* Event Name */}
         <div>
-          <label className="block text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
-            <Tag size={16} className="text-indigo-400" /> Nome do Evento
+          <label className="block text-xs font-bold text-indigo-400 uppercase tracking-wider mb-1.5 flex items-center gap-2">
+            <Tag size={14} /> Nome do Evento
           </label>
           <input 
             type="text" 
-            placeholder="Ex: Casamento Marina & Pedro"
-            className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 outline-none focus:border-indigo-500 transition-all text-white"
+            placeholder="Ex: Casamento de Maria"
+            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-indigo-500 transition-all text-white placeholder:text-gray-600"
             value={eventConfig.name}
             onChange={(e) => setEventConfig({...eventConfig, name: e.target.value})}
           />
         </div>
+
+        {/* Date */}
         <div>
-          <label className="block text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
-            <Calendar size={16} className="text-indigo-400" /> Data
+          <label className="block text-xs font-bold text-indigo-400 uppercase tracking-wider mb-1.5 flex items-center gap-2">
+            <Calendar size={14} /> Data
           </label>
           <input 
             type="text" 
-            className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 outline-none focus:border-indigo-500 transition-all text-white"
+            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-indigo-500 transition-all text-white"
             value={eventConfig.date}
             onChange={(e) => setEventConfig({...eventConfig, date: e.target.value})}
           />
         </div>
 
+        {/* Logo Upload */}
+        <div>
+          <label className="block text-xs font-bold text-indigo-400 uppercase tracking-wider mb-1.5 flex items-center gap-2">
+            <ImageIcon size={14} /> Logo do Evento
+          </label>
+          <div 
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full aspect-video rounded-xl border-2 border-dashed border-white/10 bg-white/5 hover:bg-white/10 cursor-pointer flex flex-col items-center justify-center transition-all overflow-hidden relative group"
+          >
+            {eventConfig.logo ? (
+              <>
+                <img src={eventConfig.logo} alt="Logo preview" className="w-full h-full object-contain p-4" />
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                  <span className="text-xs font-bold">ALTERAR LOGO</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <Upload className="text-gray-500 mb-2" size={24} />
+                <span className="text-xs font-medium text-gray-400">Clique para upload (PNG/JPG)</span>
+              </>
+            )}
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              className="hidden" 
+              accept="image/*"
+              onChange={handleLogoUpload}
+            />
+          </div>
+        </div>
+
         <button 
           onClick={initCamera}
           disabled={!eventConfig.name}
-          className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all ${
+          className={`w-full py-4 mt-2 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all ${
             eventConfig.name 
-              ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:scale-105 active:scale-95 text-white shadow-xl shadow-indigo-600/30' 
+              ? 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:scale-[1.02] active:scale-95 text-white shadow-xl shadow-indigo-600/30' 
               : 'bg-gray-700 text-gray-400 cursor-not-allowed'
           }`}
         >
-          Próximo <Zap size={20} />
+          Iniciar Gravação <Zap size={20} />
         </button>
       </div>
     </div>
@@ -174,7 +233,6 @@ const App: React.FC = () => {
 
   const renderCapture = () => (
     <div className="relative w-full h-full flex flex-col items-center justify-center p-4">
-      {/* Camera Preview */}
       <div className={`relative w-full max-w-2xl aspect-[9/16] md:aspect-video rounded-3xl overflow-hidden glass ${appState === AppState.RECORDING ? 'recording-ring border-4' : 'border-2 border-white/10'}`}>
         <video 
           ref={videoRef} 
@@ -184,31 +242,30 @@ const App: React.FC = () => {
           className="w-full h-full object-cover"
         />
         
-        {/* Overlay Infos */}
-        <div className="absolute top-6 left-6 flex flex-col gap-1 pointer-events-none">
-          <span className="bg-black/50 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest text-indigo-400 border border-indigo-400/30">
-            {eventConfig.name}
-          </span>
-          <span className="text-white/70 text-sm ml-1">{eventConfig.date}</span>
-        </div>
-
-        {/* Record Timer */}
-        {appState === AppState.RECORDING && (
-          <div className="absolute top-6 right-6 bg-red-600 px-4 py-1 rounded-full flex items-center gap-2 animate-pulse">
-            <div className="w-2 h-2 rounded-full bg-white"></div>
-            <span className="font-mono font-bold text-white">00:{timer < 10 ? `0${timer}` : timer}</span>
+        {/* Somente a Logo fica visível (Watermark) */}
+        {eventConfig.logo && (
+          <div className="absolute top-6 right-6 w-20 h-20 bg-black/20 backdrop-blur-sm p-2 rounded-2xl border border-white/10 flex items-center justify-center pointer-events-none">
+            <img src={eventConfig.logo} alt="Logo" className="max-w-full max-h-full object-contain" />
           </div>
         )}
 
-        {/* Start Button */}
+        {/* Timer de Gravação (Funcional e Discreto) */}
+        {appState === AppState.RECORDING && (
+          <div className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-red-600 px-6 py-2 rounded-full flex items-center gap-3 animate-pulse border-2 border-white/20">
+            <div className="w-3 h-3 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]"></div>
+            <span className="font-mono font-black text-xl text-white">00:{timer < 10 ? `0${timer}` : timer}</span>
+          </div>
+        )}
+
+        {/* Botão de Início (Centralizado e Limpo) */}
         {appState === AppState.READY && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/20 group">
+          <div className="absolute inset-0 flex items-center justify-center bg-black/10 group">
             <button 
               onClick={startRecording}
-              className="w-24 h-24 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-90 border-4 border-white"
+              className="w-28 h-28 bg-white/10 hover:bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-90 border-2 border-white"
             >
-              <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center text-white">
-                <Play fill="white" size={32} className="ml-1" />
+              <div className="w-20 h-20 bg-red-600 rounded-full flex items-center justify-center text-white shadow-lg shadow-red-600/40">
+                <Play fill="white" size={36} className="ml-1" />
               </div>
             </button>
           </div>
@@ -218,9 +275,9 @@ const App: React.FC = () => {
       <div className="mt-8 flex gap-4">
         <button 
           onClick={() => setAppState(AppState.SETUP)}
-          className="px-6 py-3 rounded-full glass hover:bg-white/10 flex items-center gap-2 transition-all"
+          className="px-6 py-3 rounded-full glass hover:bg-white/10 flex items-center gap-2 transition-all text-sm font-bold text-white"
         >
-          <Settings size={20} /> Ajustar Evento
+          <Settings size={18} /> Ajustar Evento
         </button>
       </div>
     </div>
@@ -229,36 +286,40 @@ const App: React.FC = () => {
   const renderProcessing = () => (
     <div className="max-w-md w-full glass p-10 rounded-3xl text-center space-y-6">
       <div className="relative inline-block">
-        <div className="w-24 h-24 border-4 border-white/10 border-t-indigo-500 rounded-full animate-spin"></div>
+        <div className="w-28 h-28 border-4 border-white/5 border-t-indigo-500 rounded-full animate-spin"></div>
         <div className="absolute inset-0 flex items-center justify-center">
-          <RotateCcw className="text-indigo-500 animate-reverse-spin" />
+          <RotateCcw className={`text-indigo-500 ${processingStep === 'reverse' ? 'animate-reverse-spin' : 'animate-bounce'}`} size={32} />
         </div>
       </div>
       
       <div>
-        <h2 className="text-2xl font-bold mb-2">Processando Magia...</h2>
-        <p className="text-gray-400 text-sm">Estamos criando o efeito reverso e otimizando para redes sociais.</p>
+        <h2 className="text-2xl font-black mb-1 text-white">
+          {processingStep === 'forward' ? 'Processando Giro 360°...' : 
+           processingStep === 'reverse' ? 'Criando Efeito Reverso...' : 
+           'Finalizando seu Vídeo...'}
+        </h2>
+        <p className="text-gray-400 text-sm">Criando o loop perfeito para as redes.</p>
       </div>
 
-      <div className="w-full bg-white/10 h-3 rounded-full overflow-hidden">
+      <div className="w-full bg-white/5 h-4 rounded-full overflow-hidden border border-white/10 relative">
         <div 
-          className="h-full bg-gradient-to-r from-indigo-500 to-purple-600 transition-all duration-300" 
+          className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 transition-all duration-300" 
           style={{ width: `${processingProgress}%` }}
         ></div>
+        <div className="absolute left-[50%] top-0 h-full w-[2px] bg-white/20"></div>
       </div>
-      <p className="text-xs font-mono text-indigo-400">{processingProgress}% Completo</p>
-      
-      <div className="pt-4 border-t border-white/10">
-        <p className="italic text-gray-500 text-sm">"Consultando Gemini para criar sua legenda perfeita..."</p>
+      <div className="flex justify-between text-[10px] font-black text-gray-500 uppercase tracking-widest px-1">
+        <span className={processingStep === 'forward' ? 'text-indigo-400' : ''}>Ida (Giro)</span>
+        <span className={processingStep === 'reverse' ? 'text-indigo-400' : ''}>Volta (Reverso)</span>
       </div>
     </div>
   );
 
   const renderResult = () => (
     <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-8 items-center animate-in zoom-in-95 duration-500">
-      {/* Video Preview */}
+      {/* Resultado Final com Logo */}
       <div className="glass rounded-3xl p-4 space-y-4">
-        <div className="relative aspect-[9/16] md:aspect-video rounded-2xl overflow-hidden bg-black">
+        <div className="relative aspect-[9/16] md:aspect-video rounded-2xl overflow-hidden bg-black shadow-2xl border border-white/10">
           <video 
             src={processedVideo?.url} 
             controls 
@@ -266,73 +327,83 @@ const App: React.FC = () => {
             loop 
             className="w-full h-full object-cover"
           />
-          <div className="absolute bottom-6 left-6 right-6 bg-black/40 backdrop-blur-md p-4 rounded-xl border border-white/10">
-            <p className="text-sm font-bold text-white mb-1 uppercase">{processedVideo?.event}</p>
-            <p className="text-indigo-400 text-xs font-semibold">{processedVideo?.caption}</p>
+          
+          {processedVideo?.logo && (
+            <div className="absolute top-4 right-4 w-16 h-16 bg-black/40 backdrop-blur-md p-1.5 rounded-xl border border-white/10 flex items-center justify-center">
+              <img src={processedVideo.logo} alt="Logo Final" className="max-w-full max-h-full object-contain" />
+            </div>
+          )}
+
+          <div className="absolute bottom-4 left-4 right-4 bg-gradient-to-t from-black/80 to-transparent p-4 pt-10">
+            <p className="text-white text-xs font-medium italic opacity-90">"{processedVideo?.caption}"</p>
           </div>
         </div>
+        
         <div className="flex gap-3">
           <a 
             href={processedVideo?.url} 
-            download={`360_video_${processedVideo?.id}.webm`}
-            className="flex-1 bg-white text-black py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-200 transition-all"
+            download={`360_giro_${processedVideo?.id}.webm`}
+            className="flex-1 bg-white text-black py-4 rounded-xl font-black text-sm flex items-center justify-center gap-2 hover:bg-gray-200 transition-all shadow-lg"
           >
-            <Download size={18} /> Baixar Vídeo
+            <Download size={18} /> SALVAR VÍDEO
           </a>
           <button 
             onClick={reset}
-            className="flex-1 bg-white/10 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-white/20 transition-all"
+            className="flex-1 bg-white/10 py-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-white/20 transition-all border border-white/10 text-white"
           >
-            <RefreshCw size={18} /> Novo Vídeo
+            <RefreshCw size={18} /> NOVO GIRO
           </button>
         </div>
       </div>
 
-      {/* Share Actions */}
+      {/* Share Section */}
       <div className="glass rounded-3xl p-8 space-y-8 flex flex-col items-center">
         <div className="text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-xs font-bold mb-4 uppercase">
-            <CheckCircle size={14} /> Vídeo Pronto
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-green-500/20 text-green-400 rounded-full text-[10px] font-black mb-4 uppercase tracking-tighter border border-green-500/30">
+            <CheckCircle size={14} /> EFEITO GIRO + REVERSO OK
           </div>
-          <h2 className="text-3xl font-extrabold mb-2">Compartilhe Agora!</h2>
-          <p className="text-gray-400">Aponte a câmera para o QR Code abaixo para visualizar e salvar no seu celular.</p>
+          <h2 className="text-3xl font-black mb-2 text-white">RETIRE SEU VÍDEO</h2>
+          <p className="text-gray-400 text-sm leading-relaxed">Escaneie o QR Code para salvar no seu celular.</p>
         </div>
 
-        {/* QR Code */}
-        <div className="relative">
-          <div className="absolute -inset-4 bg-gradient-to-r from-indigo-500 to-pink-500 rounded-3xl blur opacity-20 animate-pulse"></div>
-          <QRCodeDisplay value={processedVideo?.url || "https://example.com"} />
+        <div className="relative p-2 bg-white rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
+          <div className="absolute -inset-2 bg-gradient-to-tr from-indigo-500 to-pink-500 rounded-[2.8rem] blur opacity-30 animate-pulse"></div>
+          <QRCodeDisplay value={processedVideo?.url || "https://360.app"} size={220} />
+          {processedVideo?.logo && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-10 h-10 bg-white p-1 rounded-lg border-2 border-gray-100 shadow-sm overflow-hidden">
+                    <img src={processedVideo.logo} className="w-full h-full object-contain" />
+                </div>
+            </div>
+          )}
         </div>
 
-        <div className="w-full space-y-4">
-          <div className="flex items-center gap-4 p-4 bg-white/5 rounded-2xl border border-white/10">
-            <div className="w-12 h-12 bg-indigo-500/20 rounded-xl flex items-center justify-center text-indigo-400">
-              <Share2 size={24} />
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Link Curto</p>
-              <p className="text-sm truncate text-white/70">360event.me/v/{processedVideo?.id}</p>
-            </div>
-            <button 
-              onClick={() => {
+        <button 
+            className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/10 transition-all group"
+            onClick={() => {
                 navigator.clipboard.writeText(`360event.me/v/${processedVideo?.id}`);
                 alert("Link copiado!");
-              }}
-              className="px-4 py-2 bg-indigo-600 rounded-lg text-xs font-bold hover:bg-indigo-700 transition-all"
-            >
-              COPIAR
-            </button>
+            }}
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+              <Share2 size={20} />
+            </div>
+            <div className="text-left">
+              <p className="text-[10px] text-gray-500 uppercase font-black">Link Curto</p>
+              <p className="text-sm font-mono text-white/80">360event.me/v/{processedVideo?.id}</p>
+            </div>
           </div>
-        </div>
+          <div className="text-indigo-400 font-black text-xs group-hover:translate-x-1 transition-transform">COPIAR</div>
+        </button>
       </div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center p-6 relative overflow-hidden">
-      {/* Decorative Gradients */}
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-600/20 blur-[120px] rounded-full"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/20 blur-[120px] rounded-full"></div>
+    <div className="min-h-screen bg-[#050505] flex items-center justify-center p-6 relative overflow-hidden">
+      <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-indigo-900/10 blur-[150px] rounded-full"></div>
+      <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-purple-900/10 blur-[150px] rounded-full"></div>
 
       <main className="relative z-10 w-full max-w-6xl flex justify-center">
         {appState === AppState.SETUP && renderSetup()}
@@ -341,9 +412,10 @@ const App: React.FC = () => {
         {appState === AppState.RESULT && renderResult()}
       </main>
 
-      {/* Persistent Footer */}
-      <footer className="fixed bottom-6 text-center text-gray-500 text-xs font-medium tracking-widest uppercase">
-        © 2024 360° Event Master • Powered by Gemini AI
+      <footer className="fixed bottom-6 left-0 right-0 text-center flex flex-col items-center gap-1 opacity-40">
+        <div className="flex items-center gap-2 text-[10px] font-black tracking-widest uppercase text-gray-400">
+           PLATAFORMA 360 PRO <div className="w-1 h-1 bg-indigo-500 rounded-full"></div> INTELIGÊNCIA ARTIFICIAL
+        </div>
       </footer>
 
       <style dangerouslySetInnerHTML={{ __html: `
@@ -352,7 +424,7 @@ const App: React.FC = () => {
           to { transform: rotate(0deg); }
         }
         .animate-reverse-spin {
-          animation: reverse-spin 2s linear infinite;
+          animation: reverse-spin 1.5s linear infinite;
         }
       `}} />
     </div>
