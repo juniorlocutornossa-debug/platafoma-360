@@ -1,0 +1,8 @@
+{
+  "name": "360° Event Master",
+  "description": "Uma plataforma profissional para captura de vídeos 360 com efeito reverso automático, sobreposição de evento/data e compartilhamento via QR Code.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
